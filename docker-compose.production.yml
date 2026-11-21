@@ -1,0 +1,151 @@
+name: sitekit-production
+
+x-application: &application
+    build:
+        context: .
+        dockerfile: Dockerfile
+        target: app
+    image: '${SITEKIT_APP_IMAGE:-sitekit-app:production}'
+    restart: unless-stopped
+    stop_grace_period: 150s
+    init: true
+    env_file:
+        - path: '${SITEKIT_RUNTIME_DIR:-/run/sitekit}/app.env'
+          format: raw
+    environment:
+        APP_ENV: production
+        APP_DEBUG: 'false'
+        APP_URL: '${APP_URL:?Set the public HTTPS application URL}'
+        APP_MAINTENANCE_DRIVER: file
+        TRUSTED_PROXIES: '${SITEKIT_PROXY_IP:-172.30.42.2}'
+        LOG_CHANNEL: stderr
+        LOG_LEVEL: info
+        DB_CONNECTION: mysql
+        DB_HOST: mysql
+        DB_PORT: '3306'
+        DB_DATABASE: '${SITEKIT_DB_DATABASE:-sitekit}'
+        DB_USERNAME: '${SITEKIT_DB_USERNAME:-sitekit}'
+        QUEUE_CONNECTION: database
+        DB_QUEUE_RETRY_AFTER: '180'
+        CACHE_STORE: database
+        SESSION_DRIVER: database
+        SESSION_SECURE_COOKIE: 'true'
+        SESSION_ENCRYPT: 'true'
+    volumes:
+        - type: bind
+          source: '${SITEKIT_DATA_DIR:?Set the retained EBS mount path}/storage'
+          target: /var/www/html/storage
+          bind:
+              create_host_path: false
+    networks:
+        - sitekit
+    depends_on:
+        mysql:
+            condition: service_healthy
+    security_opt:
+        - no-new-privileges:true
+    cap_drop:
+        - ALL
+    logging:
+        driver: json-file
+        options:
+            max-size: 10m
+            max-file: '3'
+
+services:
+    app:
+        <<: *application
+        healthcheck:
+            test: ['CMD', 'php', '-r', 'exit(@fsockopen("127.0.0.1", 9000) ? 0 : 1);']
+            interval: 10s
+            timeout: 5s
+            retries: 6
+            start_period: 30s
+
+    queue:
+        <<: *application
+        command: ['php', 'artisan', 'queue:work', '--sleep=3', '--tries=3', '--timeout=120', '--max-time=3600']
+        stop_grace_period: 150s
+
+    scheduler:
+        <<: *application
+        command: ['php', 'artisan', 'schedule:work']
+        stop_grace_period: 150s
+
+    mysql:
+        image: mysql:8.0
+        restart: unless-stopped
+        env_file:
+            - path: '${SITEKIT_RUNTIME_DIR:-/run/sitekit}/mysql.env'
+              format: raw
+        command: ['--innodb-buffer-pool-size=128M', '--max-connections=50']
+        volumes:
+            - type: bind
+              source: '${SITEKIT_DATA_DIR:?Set the retained EBS mount path}/mysql'
+              target: /var/lib/mysql
+              bind:
+                  create_host_path: false
+        networks:
+            - sitekit
+        healthcheck:
+            test: ['CMD-SHELL', 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql --protocol=tcp -h 127.0.0.1 -u "$$MYSQL_USER" "$$MYSQL_DATABASE" -e "SELECT 1" >/dev/null']
+            interval: 10s
+            timeout: 5s
+            retries: 12
+            start_period: 60s
+        stop_grace_period: 60s
+        logging:
+            driver: json-file
+            options:
+                max-size: 10m
+                max-file: '3'
+
+    caddy:
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: caddy
+        image: '${SITEKIT_CADDY_IMAGE:-sitekit-caddy:production}'
+        restart: unless-stopped
+        environment:
+            SITEKIT_DOMAIN: '${SITEKIT_DOMAIN:?Set the public domain name}'
+        ports:
+            - '80:80'
+            - '443:443'
+            - '443:443/udp'
+        volumes:
+            - type: bind
+              source: '${SITEKIT_DATA_DIR:?Set the retained EBS mount path}/caddy/data'
+              target: /data
+              bind:
+                  create_host_path: false
+            - type: bind
+              source: '${SITEKIT_DATA_DIR:?Set the retained EBS mount path}/caddy/config'
+              target: /config
+              bind:
+                  create_host_path: false
+            - type: bind
+              source: '${SITEKIT_DATA_DIR:?Set the retained EBS mount path}/storage/app/public'
+              target: /var/www/html/storage/app/public
+              read_only: true
+              bind:
+                  create_host_path: false
+        networks:
+            sitekit:
+                ipv4_address: '${SITEKIT_PROXY_IP:-172.30.42.2}'
+        depends_on:
+            app:
+                condition: service_healthy
+        logging:
+            driver: json-file
+            options:
+                max-size: 10m
+                max-file: '3'
+
+networks:
+    sitekit:
+        driver: bridge
+        ipam:
+            config:
+                - subnet: '${SITEKIT_PROXY_SUBNET:-172.30.42.0/24}'
+                  ip_range: '${SITEKIT_CONTAINER_IP_RANGE:-172.30.42.128/25}'

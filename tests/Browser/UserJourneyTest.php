@@ -12,7 +12,7 @@ use Tests\DuskTestCase;
 
 /**
  * Comprehensive end-to-end user journey test
- * Tests the complete flow from registration to app deployment
+ * Tests the complete flow from operator login to app deployment
  *
  * Configure in .env:
  * - DUSK_TEST_USER_EMAIL
@@ -132,51 +132,21 @@ class UserJourneyTest extends DuskTestCase
     }
 
     /**
-     * Step 1: Register new user with team
+     * Step 1: Confirm signup is closed and provision the operator fixture
      */
-    public function test_01_can_register_new_user(): void
+    public function test_01_can_prepare_operator(): void
     {
         $this->browse(function (Browser $browser) {
             $browser->visit($this->baseUrl . '/app/register')
-                ->pause(2000)
-                ->screenshot('journey-01-register-page');
-
-            // Fill registration form using correct Filament field IDs
-            // Fields: data.name, data.email, data.password, data.passwordConfirmation
-            $browser->type('#data\\.name', 'Max User')
-                ->pause(200)
-                ->type('#data\\.email', $this->testEmail)
-                ->pause(200)
-                ->type('#data\\.password', $this->testPassword)
-                ->pause(200)
-                ->type('#data\\.passwordConfirmation', $this->testPassword)
-                ->pause(500)
-                ->screenshot('journey-02-form-filled');
-
-            // Submit registration using button text
-            $browser->press('Sign up')
-                ->pause(5000)
-                ->screenshot('journey-03-after-register');
-
-            // Check for team creation page or dashboard
-            $currentUrl = $browser->driver->getCurrentURL();
-            $this->addToLog('Registration URL after submit: ' . $currentUrl);
+                ->pause(1000)
+                ->assertPathIs('/app/login')
+                ->screenshot('journey-01-login-page');
         });
 
-        // Verify user was created
-        $user = User::where('email', $this->testEmail)->first();
-        if ($user) {
-            $this->addToLog('User created successfully: ' . $user->id);
-            // Mark email as verified for testing purposes
-            if (!$user->email_verified_at) {
-                $user->email_verified_at = now();
-                $user->save();
-                $this->addToLog('Email marked as verified');
-            }
-        } else {
-            $this->addError('User registration failed - user not found in database');
-        }
-        $this->assertNotNull($user, 'User should be created after registration');
+        $user = $this->ensureUserExists();
+        $this->ensureTeamExists($user);
+
+        $this->assertTrue($user->hasVerifiedEmail());
     }
 
     /**

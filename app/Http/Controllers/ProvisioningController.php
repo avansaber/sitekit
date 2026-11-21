@@ -7,6 +7,7 @@ use App\Models\Server;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class ProvisioningController extends Controller
@@ -14,6 +15,7 @@ class ProvisioningController extends Controller
     public function show(string $token): Response
     {
         $server = Server::where('agent_token', $token)
+            ->where('status', Server::STATUS_PENDING)
             ->where('agent_token_expires_at', '>', now())
             ->first();
 
@@ -30,12 +32,6 @@ class ProvisioningController extends Controller
 
     public function callback(Request $request, string $token): JsonResponse
     {
-        $server = Server::where('agent_token', $token)->first();
-
-        if (!$server) {
-            return response()->json(['error' => 'Invalid token'], 404);
-        }
-
         $validated = $request->validate([
             'ip_address' => 'required|ip',
             'public_key' => 'required|string',
@@ -46,27 +42,44 @@ class ProvisioningController extends Controller
             'disk_gb' => 'nullable|integer|min:1',
         ]);
 
-        $previousStatus = $server->status;
+        $result = DB::transaction(function () use ($token, $validated): ?array {
+            $server = Server::where('agent_token', $token)
+                ->where('status', Server::STATUS_PENDING)
+                ->where('agent_token_expires_at', '>', now())
+                ->lockForUpdate()
+                ->first();
 
-        // Generate permanent agent token for authentication
-        $permanentToken = Str::random(64);
+            if (!$server) {
+                return null;
+            }
 
-        $server->update([
-            'ip_address' => $validated['ip_address'],
-            'agent_public_key' => $validated['public_key'],
-            'os_name' => $validated['os_name'] ?? null,
-            'os_version' => $validated['os_version'] ?? null,
-            'cpu_count' => $validated['cpu_count'] ?? null,
-            'memory_mb' => $validated['memory_mb'] ?? null,
-            'disk_gb' => $validated['disk_gb'] ?? null,
-            'status' => Server::STATUS_PROVISIONING,
-            'provisioning_phase' => Server::PHASE_BOOTSTRAP,
-            'last_heartbeat_at' => now(),
-            'agent_token' => $permanentToken,
-            'agent_token_expires_at' => null, // Permanent token doesn't expire
-        ]);
+            $previousStatus = $server->status;
+            $permanentToken = Str::random(64);
 
-        // Dispatch status change event
+            $server->update([
+                'ip_address' => $validated['ip_address'],
+                'agent_public_key' => $validated['public_key'],
+                'os_name' => $validated['os_name'] ?? null,
+                'os_version' => $validated['os_version'] ?? null,
+                'cpu_count' => $validated['cpu_count'] ?? null,
+                'memory_mb' => $validated['memory_mb'] ?? null,
+                'disk_gb' => $validated['disk_gb'] ?? null,
+                'status' => Server::STATUS_PROVISIONING,
+                'provisioning_phase' => Server::PHASE_BOOTSTRAP,
+                'last_heartbeat_at' => now(),
+                'agent_token' => $permanentToken,
+                'agent_token_expires_at' => null,
+            ]);
+
+            return [$server, $previousStatus, $permanentToken];
+        });
+
+        if (!$result) {
+            return response()->json(['error' => 'Invalid or expired token'], 404);
+        }
+
+        [$server, $previousStatus, $permanentToken] = $result;
+
         if ($previousStatus !== Server::STATUS_PROVISIONING) {
             event(new ServerStatusChanged($server, $previousStatus));
         }

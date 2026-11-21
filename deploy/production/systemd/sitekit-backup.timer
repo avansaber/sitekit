@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily SiteKit control-plane backup
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=sitekit-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -337,4 +337,65 @@ class AgentControllerTest extends TestCase
         $this->assertFalse($this->server->isDatabaseHealthy('postgresql'));
         $this->assertNull($this->server->isDatabaseHealthy('redis')); // Not in health data
     }
+
+    public function test_provisioning_callback_rotates_token_and_cannot_be_replayed(): void
+    {
+        $this->server->update(['status' => Server::STATUS_PENDING]);
+
+        $response = $this->postJson(
+            '/api/provision/callback/test-agent-token-123',
+            $this->provisioningPayload(),
+        );
+
+        $response->assertOk()->assertJsonPath('success', true);
+
+        $permanentToken = $response->json('agent_token');
+        $this->assertNotSame('test-agent-token-123', $permanentToken);
+        $this->assertDatabaseHas('servers', [
+            'id' => $this->server->id,
+            'status' => Server::STATUS_PROVISIONING,
+            'agent_token' => $permanentToken,
+            'agent_token_expires_at' => null,
+        ]);
+
+        $this->postJson(
+            '/api/provision/callback/test-agent-token-123',
+            $this->provisioningPayload(),
+        )->assertNotFound();
+    }
+
+    public function test_provisioning_callback_rejects_expired_token(): void
+    {
+        $this->server->update([
+            'status' => Server::STATUS_PENDING,
+            'agent_token_expires_at' => now()->subMinute(),
+        ]);
+
+        $this->postJson(
+            '/api/provision/callback/test-agent-token-123',
+            $this->provisioningPayload(),
+        )->assertNotFound();
+
+        $this->assertSame(Server::STATUS_PENDING, $this->server->fresh()->status);
+    }
+
+    public function test_provisioning_script_rejects_non_pending_server(): void
+    {
+        $this->get('/provision/test-agent-token-123')
+            ->assertStatus(400)
+            ->assertSeeText('Invalid or expired token');
+    }
+
+    private function provisioningPayload(): array
+    {
+        return [
+            'ip_address' => '203.0.113.10',
+            'public_key' => 'test-public-key',
+            'os_name' => 'Ubuntu',
+            'os_version' => '24.04',
+            'cpu_count' => 4,
+            'memory_mb' => 8192,
+            'disk_gb' => 100,
+        ];
+    }
 }

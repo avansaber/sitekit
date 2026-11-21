@@ -1,0 +1,13 @@
+[Unit]
+Description=Back up the SiteKit database and Laravel storage to S3
+Requires=sitekit.service
+After=sitekit.service
+PartOf=sitekit.service
+RequiresMountsFor=@DATA_DIR@
+
+[Service]
+Type=oneshot
+Environment=SITEKIT_HOST_CONFIG=@HOST_CONFIG@
+WorkingDirectory=@PROJECT_DIR@
+ExecStart=/usr/bin/bash @PROJECT_DIR@/deploy/production/sitekit.sh backup
+TimeoutStartSec=3600

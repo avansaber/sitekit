@@ -1,0 +1,18 @@
+[Unit]
+Description=SiteKit production control plane
+Requires=docker.service
+After=docker.service network-online.target
+RequiresMountsFor=@DATA_DIR@
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=SITEKIT_HOST_CONFIG=@HOST_CONFIG@
+WorkingDirectory=@PROJECT_DIR@
+ExecStart=/usr/bin/bash @PROJECT_DIR@/deploy/production/sitekit.sh start
+ExecStop=/usr/bin/bash @PROJECT_DIR@/deploy/production/sitekit.sh stop
+TimeoutStartSec=900
+TimeoutStopSec=3600
+
+[Install]
+WantedBy=multi-user.target

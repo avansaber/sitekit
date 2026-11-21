@@ -25,8 +25,11 @@ class AiChatFeatureTest extends TestCase
     {
         parent::setUp();
 
-        // Create user and team
-        $this->user = User::factory()->create();
+        // Create a configured operator and team
+        $this->user = User::factory()->create([
+            'two_factor_secret' => encrypt('test-secret'),
+            'two_factor_confirmed_at' => now(),
+        ]);
         $this->team = Team::factory()->create();
         $this->team->users()->attach($this->user->id, ['role' => 'owner']);
 

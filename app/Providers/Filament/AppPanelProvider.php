@@ -3,6 +3,8 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Pages\ApiTokens;
+use App\Http\Middleware\RequireTwoFactorAuthentication;
+use App\Filament\Pages\Auth\EmailVerificationPrompt;
 use App\Filament\Pages\CreateTeam;
 use App\Filament\Pages\EditProfile;
 use App\Filament\Pages\EditTeam;
@@ -44,9 +46,8 @@ class AppPanelProvider extends PanelProvider
             ->id('app')
             ->path('app')
             ->login()
-            ->registration()
             ->passwordReset()
-            ->emailVerification()
+            ->emailVerification(EmailVerificationPrompt::class)
             ->viteTheme('resources/css/app.css')
             ->colors([
                 'primary' => Color::Gray,
@@ -92,6 +93,7 @@ class AppPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+                RequireTwoFactorAuthentication::class,
             ])
             ->plugin(ThemesPlugin::make())
             ->renderHook(

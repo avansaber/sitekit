@@ -4,14 +4,12 @@ namespace App\Providers;
 
 use App\Events\ServerStatsUpdated;
 use App\Events\ServerStatusChanged;
-use App\Listeners\CreatePersonalTeam;
 use App\Listeners\ServerStatsListener;
 use App\Listeners\ServerStatusListener;
 use App\Models\WebApp;
 use App\Notifications\Channels\DiscordWebhookChannel;
 use App\Notifications\Channels\SlackWebhookChannel;
 use App\Observers\WebAppObserver;
-use Filament\Events\Auth\Registered;
 use Illuminate\Notifications\ChannelManager;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
@@ -34,9 +32,6 @@ class AppServiceProvider extends ServiceProvider
     {
         // Register model observers
         WebApp::observe(WebAppObserver::class);
-
-        // Register Filament registration event listener
-        Event::listen(Registered::class, CreatePersonalTeam::class);
 
         // Register server event listeners for resource monitoring
         Event::listen(ServerStatsUpdated::class, ServerStatsListener::class);

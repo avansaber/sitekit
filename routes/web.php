@@ -26,7 +26,8 @@ Route::get('/docs/{topic?}', [\App\Http\Controllers\PublicDocsController::class,
 
 Route::redirect('/login', '/app/login')->name('login');
 
-Route::redirect('/register', '/app/register')->name('register');
+Route::redirect('/register', '/app/login')->name('register');
+Route::redirect('/app/register', '/app/login')->name('filament.register');
 
 Route::redirect('/dashboard', '/app')->name('dashboard');
 

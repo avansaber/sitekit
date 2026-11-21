@@ -27,13 +27,41 @@ SiteKit is an open-source server management platform that makes it easy to deplo
 
 ## Requirements
 
-- PHP 8.2 or higher
+- Docker Desktop or Docker Engine with Docker Compose (for Laravel Sail)
+- PHP 8.4 or higher for the committed dependency lock (the Composer constraint allows `^8.2`, but locked Symfony 8 packages require PHP 8.4)
 - Composer 2.x
-- Node.js 18+ and npm
-- MySQL 8.0+ / MariaDB 10.6+ / PostgreSQL 14+ (or SQLite for development)
-- Redis (optional, for caching/queues)
+- Node.js 18+ and npm (only required for a native, non-Docker setup)
+- MySQL 8.0+ / MariaDB 10.6+ / PostgreSQL 14+ (provided by Sail for local development)
+- Redis (provided by Sail for local development; optional for a native setup)
 
 ## Installation
+
+### Docker with Laravel Sail
+
+SiteKit includes Laravel Sail as a development dependency. Its PHP 8.4 runtime matches the current lockfile. Install Composer dependencies before building because Sail's PHP runtime is under `vendor/`.
+
+```bash
+cp .env.example .env
+composer install
+./vendor/bin/sail up -d --build
+./vendor/bin/sail artisan key:generate
+./vendor/bin/sail artisan migrate
+./vendor/bin/sail npm install
+```
+
+In a separate terminal, start Vite so the host browser can reach it:
+
+```bash
+./vendor/bin/sail npm run dev -- --host=0.0.0.0
+```
+
+Open [http://localhost:8000](http://localhost:8000). The Compose stack starts the web app, MySQL, Redis, a queue worker, and the Laravel scheduler. Public registration is disabled. Create the sole operator account with `./vendor/bin/sail artisan sitekit:make-user`, then enable two-factor authentication in the profile settings.
+
+The app and forwarded database/cache ports bind to `127.0.0.1` by default. Change `APP_PORT`, `FORWARD_DB_PORT`, or `FORWARD_REDIS_PORT` in `.env` if those ports are already in use.
+
+The containers have normal outbound network access through Docker's bridge network; no host networking or inbound SSH port is needed. SiteKit's managed-server workflow communicates through agent HTTPS callbacks and polling. This Compose setup is for local development, not a production deployment.
+
+### Native installation (without Docker)
 
 ### 1. Clone the Repository
 
@@ -79,17 +107,29 @@ DB_CONNECTION=sqlite
 # Creates database/database.sqlite automatically
 ```
 
+The checked-in environment defaults target Sail. For a native setup, use `127.0.0.1` for services running on your host; with SQLite, set `CACHE_STORE=database` and `QUEUE_CONNECTION=database`.
+
+#### Email verification
+
+Public registration is disabled. The trusted `sitekit:make-user` command creates the sole operator as verified because it requires shell access to the application host. Email delivery is still required for password resets and operational notifications.
+
+Configure a delivery mailer (for example, `MAIL_MAILER=smtp` with your provider's host, port, credentials, and `MAIL_FROM_ADDRESS`), then run `php artisan config:clear` (or `./vendor/bin/sail artisan config:clear`) and restart long-running queue workers.
+
+Detection uses Laravel's active configuration, including cached configuration. It recognizes non-delivering `log`/`array` mailers, missing SMTP hosts or API credentials for Postmark, Resend, and Mailgun, and composite mailers without a configured delivery transport. It does not test connectivity, credential validity, or queue-worker health; SMTP relays and SES may authenticate without explicit credentials.
+
 ### 4. Run Database Migrations
 
 ```bash
 php artisan migrate
 ```
 
-### 5. Create Admin User (Optional)
+### 5. Create the Operator User
 
 ```bash
-php artisan make:filament-user
+php artisan sitekit:make-user
 ```
+
+This command works only before any user exists. It creates one verified account with a personal team; public and additional user registration is disabled.
 
 ### 6. Start the Application
 
@@ -144,12 +184,10 @@ Then update your `.env`:
 
 ```env
 APP_URL=https://your-subdomain.ngrok-free.app
-
-# OAuth callback URLs will use this automatically
-GITHUB_REDIRECT_URI=${APP_URL}/oauth/github/callback
+TRUSTED_PROXIES=*
 ```
 
-**Also update your OAuth app settings** in GitHub/GitLab/Bitbucket to use the ngrok URL for the callback.
+Set the OAuth callback URLs in the provider settings to the public URL, for example `https://your-subdomain.ngrok-free.app/oauth/github/callback`. Use the corresponding `/oauth/gitlab/callback` or `/oauth/bitbucket/callback` path for those providers. `TRUSTED_PROXIES=*` lets Laravel honor the tunnel's forwarded host and HTTPS scheme when generating agent callback URLs. This is appropriate for the local Sail setup because the app port is loopback-only; for production, trust only the actual proxy addresses and prevent direct access to the app container.
 
 > **Note:** With ngrok free tier, the URL changes each restart. Consider ngrok paid or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/) for a stable URL.
 
@@ -172,6 +210,16 @@ For self-hosted production:
 This is the standard pattern for server management tools (Forge, Coolify, CapRover all work this way).
 
 ## Production Deployment
+
+### AWS With Docker
+
+Use the separate [production stack](docker-compose.production.yml) and [AWS deployment runbook](deploy/production/README.md) for the retained-EBS EC2 stop/start workflow. It includes Caddy TLS, automatic service restarts, database-backed queue/cache/sessions, SSM secret loading, and control-plane S3 backup/restore automation. Do not use the Sail Compose definition for production.
+
+The runbook covers the remaining host/AWS setup and the required real stop/start and restore drills. Repository automation does not provision or modify AWS resources.
+
+### Native Setup
+
+The following Supervisor, cron, and Nginx examples are alternatives for a native installation; do not run them alongside the production Docker worker/scheduler.
 
 ### Queue Worker
 
@@ -271,8 +319,8 @@ DB_PASSWORD=secure_password
 # Queue (use database or redis)
 QUEUE_CONNECTION=database
 
-# Cache (use redis for production)
-CACHE_STORE=redis
+# Cache (database avoids a separate Redis service)
+CACHE_STORE=database
 
 # Session
 SESSION_DRIVER=database
